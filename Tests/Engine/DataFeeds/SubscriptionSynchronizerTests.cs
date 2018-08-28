@@ -62,17 +62,24 @@ namespace QuantConnect.Tests.Engine.DataFeeds
 
             var endTimeUtc = algorithm.EndDate.ConvertToUtc(TimeZones.NewYork);
             var startTimeUtc = algorithm.StartDate.ConvertToUtc(TimeZones.NewYork);
+            var dataFeedSubscriptionManager = new DataFeedSubscriptionManager
+            {
+                DataFeedSubscriptions = new SubscriptionCollection()
+            };
+            var subscriptionBasedTimeProvider = new SubscriptionFrontierTimeProvider(startTimeUtc, dataFeedSubscriptionManager);
 
             var feed = new AlgorithmManagerTests.MockDataFeed();
             var universeSelection = new UniverseSelection(feed, algorithm);
-            var synchronizer = new SubscriptionSynchronizer(universeSelection, algorithm.TimeZone, algorithm.Portfolio.CashBook, startTimeUtc);
+            var synchronizer = new SubscriptionSynchronizer(universeSelection, algorithm.TimeZone,
+                                                            algorithm.Portfolio.CashBook,
+                                                            subscriptionBasedTimeProvider);
 
             var totalDataPoints = 0;
-            var subscriptions = new List<Subscription>();
+            var subscriptions = dataFeedSubscriptionManager.DataFeedSubscriptions;
             foreach (var kvp in algorithm.Securities)
             {
                 int dataPointCount;
-                subscriptions.Add(CreateSubscription(algorithm, kvp.Value, startTimeUtc, endTimeUtc, out dataPointCount));
+                subscriptions.TryAdd(CreateSubscription(algorithm, kvp.Value, startTimeUtc, endTimeUtc, out dataPointCount));
                 totalDataPoints += dataPointCount;
             }
 
@@ -80,7 +87,7 @@ namespace QuantConnect.Tests.Engine.DataFeeds
             synchronizer.Sync(subscriptions);
 
             // log what we're doing
-            Console.WriteLine($"Running {subscriptions.Count} subscriptions with a total of {totalDataPoints} data points. Start: {algorithm.StartDate:yyyy-MM-dd} End: {algorithm.EndDate:yyyy-MM-dd}");
+            Console.WriteLine($"Running {subscriptions.Count()} subscriptions with a total of {totalDataPoints} data points. Start: {algorithm.StartDate:yyyy-MM-dd} End: {algorithm.EndDate:yyyy-MM-dd}");
 
             var count = 0;
             DateTime currentTime;
@@ -122,6 +129,11 @@ namespace QuantConnect.Tests.Engine.DataFeeds
         private class DataPoint : BaseData
         {
             // bare bones base data to minimize memory footprint
+        }
+
+        private class DataFeedSubscriptionManager : IDataFeedSubscriptionManager
+        {
+            public SubscriptionCollection DataFeedSubscriptions { get; set; }
         }
     }
 }
