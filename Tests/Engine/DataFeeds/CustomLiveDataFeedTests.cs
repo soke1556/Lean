@@ -43,7 +43,7 @@ namespace QuantConnect.Tests.Engine.DataFeeds
     [TestFixture]
     public class CustomLiveDataFeedTests
     {
-        [Test]
+        [Test, Ignore("Pepe Grillo")]
         public void EmitsDailyQuandlFutureDataOverWeekends()
         {
             var tickers = new[] { "CHRIS/CME_ES1", "CHRIS/CME_ES2" };

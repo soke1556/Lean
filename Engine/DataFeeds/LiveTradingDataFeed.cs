@@ -18,6 +18,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.Specialized;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -274,7 +275,7 @@ namespace QuantConnect.Lean.Engine.DataFeeds
             // the heartbeat of the application, so this value will contain a second after
             // the last emit time, and if we pass this time, we'll emit even with no data
             var nextEmit = DateTime.MinValue;
-
+            var ts = Stopwatch.StartNew();
             try
             {
                 while (!_cancellationTokenSource.IsCancellationRequested)
@@ -292,11 +293,18 @@ namespace QuantConnect.Lean.Engine.DataFeeds
                         var config = subscription.Configuration;
                         var packet = new DataFeedPacket(subscription.Security, config, subscription.RemovedFromUniverse);
 
+                        ts.Start();
                         // dequeue data that is time stamped at or before this frontier
                         while (subscription.MoveNext() && subscription.Current != null)
                         {
                             packet.Add(subscription.Current.Data);
                         }
+                        ts.Stop();
+                        if (ts.ElapsedMilliseconds > 500)
+                        {
+                            Log.Error($"ERROR Moving: {config.Symbol}. Took {ts.ElapsedMilliseconds}ms");
+                        }
+                        ts.Reset();
 
                         // if we have data, add it to be added to the bridge
                         if (packet.Count > 0) data.Add(packet);
@@ -308,11 +316,18 @@ namespace QuantConnect.Lean.Engine.DataFeeds
                             {
                                 var universe = subscription.Universe;
 
+                                ts.Start();
                                 // always wait for other thread to sync up
                                 if (!_bridge.WaitHandle.WaitOne(Timeout.Infinite, _cancellationTokenSource.Token))
                                 {
                                     break;
                                 }
+                                ts.Stop();
+                                if (ts.ElapsedMilliseconds > 500)
+                                {
+                                    Log.Error($"ERROR _bridge.WaitHandle. Took {ts.ElapsedMilliseconds}ms");
+                                }
+                                ts.Reset();
 
                                 // assume that if the first item is a base data collection then the enumerator handled the aggregation,
                                 // otherwise, load all the the data into a new collection instance
@@ -328,14 +343,28 @@ namespace QuantConnect.Lean.Engine.DataFeeds
                                     universeData[universe] = collection;
                                 }
 
+                                ts.Start();
                                 _changes += _universeSelection.ApplyUniverseSelection(universe, _frontierUtc, collection);
+                                ts.Stop();
+                                if (ts.ElapsedMilliseconds > 500)
+                                {
+                                    Log.Error($"ERROR _universeSelection.ApplyUniverseSelection. Took {ts.ElapsedMilliseconds}ms");
+                                }
+                                ts.Reset();
                             }
 
                             // remove subscription for universe data if disposal requested AFTER time sync
                             // this ensures we get any security changes from removing the universe and its children
                             if (subscription.Universe.DisposeRequested)
                             {
+                                ts.Start();
                                 RemoveSubscription(subscription.Configuration);
+                                ts.Stop();
+                                if (ts.ElapsedMilliseconds > 500)
+                                {
+                                    Log.Error($"ERROR RemoveSubscription. Took {ts.ElapsedMilliseconds}ms");
+                                }
+                                ts.Reset();
                             }
                         }
                     }
@@ -346,7 +375,14 @@ namespace QuantConnect.Lean.Engine.DataFeeds
                     // emit on data or if we've elapsed a full second since last emit
                     if (data.Count != 0 || _frontierUtc >= nextEmit)
                     {
+                        ts.Start();
                         _bridge.Add(TimeSlice.Create(_frontierUtc, _algorithm.TimeZone, _algorithm.Portfolio.CashBook, data, _changes, universeData), _cancellationTokenSource.Token);
+                        ts.Stop();
+                        if (ts.ElapsedMilliseconds > 500)
+                        {
+                            Log.Error($"ERROR _bridge.Add. Took {ts.ElapsedMilliseconds}ms");
+                        }
+                        ts.Reset();
 
                         // force emitting every second
                         nextEmit = _frontierUtc.RoundDown(Time.OneSecond).Add(Time.OneSecond);
